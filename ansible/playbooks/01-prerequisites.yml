@@ -1,0 +1,94 @@
+#==============================================================================
+# Playbook 01: Prerequisites
+#==============================================================================
+# Installs common prerequisites on all nodes including Docker, containerd,
+# and Kubernetes tools. Also configures kernel settings.
+#
+# Run: ansible-playbook -i inventory/hosts.ini playbooks/01-prerequisites.yml
+#==============================================================================
+---
+- name: Install prerequisites on Kubernetes nodes
+  hosts: k8s_cluster
+  become: yes
+  gather_facts: yes
+  tags:
+    - prerequisites
+    - k8s
+
+  pre_tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Upgrade all packages
+      apt:
+        upgrade: dist
+        autoremove: yes
+      when: upgrade_packages | default(false)
+
+  roles:
+    - role: docker
+      tags: docker
+    - role: kubeadm
+      tags: kubeadm
+
+  post_tasks:
+    - name: Verify Docker is running
+      systemd:
+        name: docker
+        state: started
+      register: docker_status
+
+    - name: Verify containerd is running
+      systemd:
+        name: containerd
+        state: started
+      register: containerd_status
+
+    - name: Verify kubelet is running
+      systemd:
+        name: kubelet
+        state: started
+      register: kubelet_status
+
+    - name: Display installation status
+      debug:
+        msg: |
+          Docker: {{ 'Running' if docker_status.status.ActiveState == 'active' else 'Not Running' }}
+          Containerd: {{ 'Running' if containerd_status.status.ActiveState == 'active' else 'Not Running' }}
+          Kubelet: {{ 'Running' if kubelet_status.status.ActiveState == 'active' else 'Not Running' }}
+
+#------------------------------------------------------------------------------
+# MongoDB Server Prerequisites
+#------------------------------------------------------------------------------
+- name: Install prerequisites on MongoDB server
+  hosts: mongodb
+  become: yes
+  gather_facts: yes
+  tags:
+    - prerequisites
+    - mongodb
+
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install common packages
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+          - software-properties-common
+          - python3-pip
+          - python3-pymongo
+        state: present
+
+    - name: Display MongoDB server ready status
+      debug:
+        msg: "MongoDB server prerequisites installed successfully"

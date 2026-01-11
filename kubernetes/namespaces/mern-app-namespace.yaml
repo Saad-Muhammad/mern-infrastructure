@@ -1,0 +1,13 @@
+#==============================================================================
+# MERN Application Namespace
+#==============================================================================
+# Creates the dedicated namespace for the MERN Todo application.
+#==============================================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mern-app
+  labels:
+    name: mern-app
+    app.kubernetes.io/name: mern-app
+    app.kubernetes.io/part-of: mern-stack

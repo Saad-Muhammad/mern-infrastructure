@@ -1,0 +1,57 @@
+#==============================================================================
+# Ansible Inventory Example
+#==============================================================================
+# Copy this file to hosts.ini and update with actual IP addresses from
+# Terraform outputs. Use the setup.sh script to auto-generate this.
+#==============================================================================
+
+#------------------------------------------------------------------------------
+# Bastion Host (Jump Server)
+#------------------------------------------------------------------------------
+[bastion]
+bastion ansible_host=<BASTION_PUBLIC_IP> ansible_user=ubuntu
+
+#------------------------------------------------------------------------------
+# Kubernetes Master Node
+#------------------------------------------------------------------------------
+[master]
+k8s-master ansible_host=<MASTER_PRIVATE_IP> ansible_user=ubuntu
+
+#------------------------------------------------------------------------------
+# Kubernetes Worker Nodes
+#------------------------------------------------------------------------------
+[workers]
+k8s-worker-1 ansible_host=<WORKER_1_PRIVATE_IP> ansible_user=ubuntu
+k8s-worker-2 ansible_host=<WORKER_2_PRIVATE_IP> ansible_user=ubuntu
+
+#------------------------------------------------------------------------------
+# MongoDB Server
+#------------------------------------------------------------------------------
+[mongodb]
+mongodb-server ansible_host=<MONGODB_PRIVATE_IP> ansible_user=ubuntu
+
+#------------------------------------------------------------------------------
+# Kubernetes Cluster (Master + Workers)
+#------------------------------------------------------------------------------
+[k8s_cluster:children]
+master
+workers
+
+#------------------------------------------------------------------------------
+# All Private Instances (accessible via bastion)
+#------------------------------------------------------------------------------
+[private:children]
+master
+workers
+mongodb
+
+#------------------------------------------------------------------------------
+# Global Variables
+#------------------------------------------------------------------------------
+[all:vars]
+ansible_ssh_private_key_file=~/.ssh/your-key.pem
+ansible_ssh_common_args='-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
+
+# ProxyJump through bastion for private instances
+[private:vars]
+ansible_ssh_common_args='-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ProxyCommand="ssh -W %h:%p -q ubuntu@<BASTION_PUBLIC_IP> -i ~/.ssh/your-key.pem"'

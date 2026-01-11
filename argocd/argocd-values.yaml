@@ -1,0 +1,99 @@
+#==============================================================================
+# ArgoCD Helm Values
+#==============================================================================
+# Custom values for ArgoCD Helm chart deployment.
+# Use these values when deploying ArgoCD via Helm instead of manifests.
+#==============================================================================
+
+# Server configuration
+server:
+  # Service type
+  service:
+    type: NodePort
+    nodePortHttp: 30080
+    nodePortHttps: 30443
+  
+  # Ingress disabled (using ALB path routing if needed)
+  ingress:
+    enabled: false
+  
+  # Extra args for server
+  extraArgs:
+    - --insecure  # Disable TLS on server (ALB handles TLS)
+  
+  # Resources
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# Repository credentials (if needed for private repos)
+configs:
+  repositories:
+    mern-infrastructure:
+      url: https://github.com/yourusername/mern-infrastructure.git
+      # For private repos, add credentials:
+      # username: your-username
+      # password: your-personal-access-token
+  
+  # Secret for repository credentials
+  secret:
+    createSecret: true
+    # Add repository credentials here
+    # repositoryCredentials:
+    #   default:
+    #     username: your-username
+    #     password: your-token
+
+# Controller configuration
+controller:
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# Repo server configuration  
+repoServer:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# Application Set controller
+applicationSet:
+  enabled: true
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+# Notifications controller
+notifications:
+  enabled: true
+
+# Dex (SSO) - disabled for simple setup
+dex:
+  enabled: false
+
+# Redis
+redis:
+  enabled: true
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi

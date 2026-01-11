@@ -1,0 +1,25 @@
+#==============================================================================
+# Backend Service
+#==============================================================================
+# NodePort service exposing the backend API.
+# ALB routes /api/* traffic to this service via NodePort 30002.
+#==============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-service
+  namespace: mern-app
+  labels:
+    app: backend
+    app.kubernetes.io/name: backend
+    app.kubernetes.io/component: api
+spec:
+  type: NodePort
+  selector:
+    app: backend
+  ports:
+    - name: http
+      protocol: TCP
+      port: 3000          # Service port
+      targetPort: 3000    # Container port
+      nodePort: 30002     # External NodePort for ALB

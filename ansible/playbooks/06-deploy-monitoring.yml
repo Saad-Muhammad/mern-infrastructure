@@ -1,0 +1,174 @@
+#==============================================================================
+# Playbook 06: Deploy Monitoring Stack
+#==============================================================================
+# Deploys Prometheus and Grafana using kube-prometheus-stack Helm chart.
+# Configures Grafana with NodePort for external access.
+#
+# Run: ansible-playbook -i inventory/hosts.ini playbooks/06-deploy-monitoring.yml
+#==============================================================================
+---
+- name: Deploy monitoring stack
+  hosts: master
+  become: no
+  become_user: ubuntu
+  gather_facts: no
+  tags:
+    - monitoring
+    - prometheus
+    - grafana
+
+  environment:
+    KUBECONFIG: /home/ubuntu/.kube/config
+
+  vars:
+    monitoring_namespace: monitoring
+    prometheus_stack_release: prometheus-stack
+    prometheus_stack_chart: prometheus-community/kube-prometheus-stack
+
+  tasks:
+    #--------------------------------------------------------------------------
+    # Create monitoring namespace
+    #--------------------------------------------------------------------------
+    - name: Create monitoring namespace
+      command: kubectl create namespace {{ monitoring_namespace }}
+      register: create_ns
+      changed_when: create_ns.rc == 0
+      failed_when: create_ns.rc != 0 and 'AlreadyExists' not in create_ns.stderr
+
+    #--------------------------------------------------------------------------
+    # Create Helm values file
+    #--------------------------------------------------------------------------
+    - name: Create prometheus-stack values file
+      copy:
+        dest: /tmp/prometheus-values.yaml
+        content: |
+          # Grafana Configuration
+          grafana:
+            enabled: true
+            adminPassword: "{{ grafana_admin_password }}"
+            service:
+              type: NodePort
+              nodePort: {{ grafana_nodeport }}
+            ingress:
+              enabled: false
+            # Root URL for proper subpath routing
+            grafana.ini:
+              server:
+                root_url: "%(protocol)s://%(domain)s/grafana"
+                serve_from_sub_path: true
+          
+          # Prometheus Configuration
+          prometheus:
+            prometheusSpec:
+              retention: {{ prometheus_retention }}
+              storageSpec:
+                volumeClaimTemplate:
+                  spec:
+                    accessModes: ["ReadWriteOnce"]
+                    resources:
+                      requests:
+                        storage: {{ prometheus_storage_size }}
+              serviceMonitorSelectorNilUsesHelmValues: false
+              podMonitorSelectorNilUsesHelmValues: false
+            service:
+              type: ClusterIP
+          
+          # AlertManager Configuration
+          alertmanager:
+            enabled: true
+            alertmanagerSpec:
+              storage:
+                volumeClaimTemplate:
+                  spec:
+                    accessModes: ["ReadWriteOnce"]
+                    resources:
+                      requests:
+                        storage: 10Gi
+          
+          # Node Exporter
+          nodeExporter:
+            enabled: true
+          
+          # Kube State Metrics
+          kubeStateMetrics:
+            enabled: true
+        mode: '0644'
+
+    #--------------------------------------------------------------------------
+    # Install kube-prometheus-stack
+    #--------------------------------------------------------------------------
+    - name: Check if prometheus-stack is already installed
+      command: helm list -n {{ monitoring_namespace }} -q
+      register: helm_releases
+      changed_when: false
+
+    - name: Install kube-prometheus-stack Helm chart
+      command: >
+        helm upgrade --install {{ prometheus_stack_release }}
+        {{ prometheus_stack_chart }}
+        --namespace {{ monitoring_namespace }}
+        --values /tmp/prometheus-values.yaml
+        --wait
+        --timeout 10m
+      register: prometheus_install
+      when: prometheus_stack_release not in helm_releases.stdout
+
+    - name: Display installation output
+      debug:
+        var: prometheus_install.stdout_lines
+      when: prometheus_install is changed
+
+    #--------------------------------------------------------------------------
+    # Wait for pods to be ready
+    #--------------------------------------------------------------------------
+    - name: Wait for Prometheus pods to be ready
+      command: >
+        kubectl wait --for=condition=ready pods
+        -l app.kubernetes.io/name=prometheus
+        -n {{ monitoring_namespace }}
+        --timeout=300s
+      register: prometheus_ready
+      retries: 5
+      delay: 30
+      until: prometheus_ready.rc == 0
+      failed_when: false
+
+    - name: Wait for Grafana pods to be ready
+      command: >
+        kubectl wait --for=condition=ready pods
+        -l app.kubernetes.io/name=grafana
+        -n {{ monitoring_namespace }}
+        --timeout=300s
+      register: grafana_ready
+      retries: 5
+      delay: 30
+      until: grafana_ready.rc == 0
+
+    #--------------------------------------------------------------------------
+    # Display access information
+    #--------------------------------------------------------------------------
+    - name: Get monitoring pods
+      command: kubectl get pods -n {{ monitoring_namespace }} -o wide
+      register: monitoring_pods
+      changed_when: false
+
+    - name: Get monitoring services
+      command: kubectl get svc -n {{ monitoring_namespace }}
+      register: monitoring_services
+      changed_when: false
+
+    - name: Display monitoring stack status
+      debug:
+        msg: |
+          Monitoring Stack Deployed Successfully!
+          
+          Pods:
+          {{ monitoring_pods.stdout }}
+          
+          Services:
+          {{ monitoring_services.stdout }}
+          
+          Access Grafana at: http://<ALB_DNS>/grafana
+          Grafana Credentials:
+            Username: admin
+            Password: {{ grafana_admin_password }}

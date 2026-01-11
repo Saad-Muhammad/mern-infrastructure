@@ -1,0 +1,257 @@
+#==============================================================================
+# Playbook 08: Setup MongoDB
+#==============================================================================
+# Installs and configures MongoDB on the dedicated EC2 instance.
+# Sets up authentication, creates application user, and installs exporter.
+#
+# Run: ansible-playbook -i inventory/hosts.ini playbooks/08-setup-mongodb.yml
+#==============================================================================
+---
+- name: Setup MongoDB server
+  hosts: mongodb
+  become: yes
+  gather_facts: yes
+  tags:
+    - mongodb
+    - database
+
+  vars:
+    mongodb_exporter_version: "0.40.0"
+    mongodb_exporter_user: "exporter"
+    mongodb_exporter_password: "exporter_password"
+
+  tasks:
+    #--------------------------------------------------------------------------
+    # Mount EBS volume for MongoDB data
+    #--------------------------------------------------------------------------
+    - name: Check if data volume is mounted
+      stat:
+        path: "{{ mongodb_data_dir }}"
+      register: data_dir
+
+    - name: Create MongoDB data directory
+      file:
+        path: "{{ mongodb_data_dir }}"
+        state: directory
+        owner: mongodb
+        group: mongodb
+        mode: '0755'
+      when: not data_dir.stat.exists
+
+    - name: Wait for EBS volume to be attached
+      wait_for:
+        path: /dev/xvdf
+        state: present
+        timeout: 300
+      ignore_errors: yes
+
+    - name: Check if EBS volume is formatted
+      command: blkid /dev/xvdf
+      register: blkid_result
+      changed_when: false
+      failed_when: false
+
+    - name: Format EBS volume
+      filesystem:
+        fstype: xfs
+        dev: /dev/xvdf
+      when: blkid_result.rc != 0
+
+    - name: Mount EBS volume
+      mount:
+        path: "{{ mongodb_data_dir }}"
+        src: /dev/xvdf
+        fstype: xfs
+        state: mounted
+
+    #--------------------------------------------------------------------------
+    # Install MongoDB
+    #--------------------------------------------------------------------------
+    - name: Import MongoDB GPG key
+      ansible.builtin.get_url:
+        url: "https://pgp.mongodb.com/server-{{ mongodb_version }}.asc"
+        dest: /etc/apt/trusted.gpg.d/mongodb-server-{{ mongodb_version }}.asc
+        mode: '0644'
+
+    - name: Add MongoDB repository
+      apt_repository:
+        repo: "deb [ arch=amd64,arm64 signed-by=/etc/apt/trusted.gpg.d/mongodb-server-{{ mongodb_version }}.asc ] https://repo.mongodb.org/apt/ubuntu {{ ansible_distribution_release }}/mongodb-org/{{ mongodb_version }} multiverse"
+        state: present
+        filename: mongodb-org-{{ mongodb_version }}
+
+    - name: Install MongoDB packages
+      apt:
+        name:
+          - mongodb-org
+          - mongodb-org-server
+          - mongodb-org-shell
+          - mongodb-org-tools
+        state: present
+        update_cache: yes
+
+    #--------------------------------------------------------------------------
+    # Configure MongoDB
+    #--------------------------------------------------------------------------
+    - name: Set ownership of data directory
+      file:
+        path: "{{ mongodb_data_dir }}"
+        owner: mongodb
+        group: mongodb
+        state: directory
+        recurse: yes
+
+    - name: Create MongoDB log directory
+      file:
+        path: "{{ mongodb_log_dir }}"
+        state: directory
+        owner: mongodb
+        group: mongodb
+        mode: '0755'
+
+    - name: Configure MongoDB (without auth first)
+      template:
+        src: mongod.conf.j2
+        dest: /etc/mongod.conf
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Restart MongoDB
+
+    - name: Start MongoDB service
+      systemd:
+        name: mongod
+        state: started
+        enabled: yes
+        daemon_reload: yes
+
+    - name: Wait for MongoDB to be ready
+      wait_for:
+        port: "{{ mongodb_port }}"
+        host: 127.0.0.1
+        delay: 5
+        timeout: 60
+
+    #--------------------------------------------------------------------------
+    # Create users (only if not exist)
+    #--------------------------------------------------------------------------
+    - name: Check if admin user exists
+      shell: |
+        mongosh --quiet --eval "db.getSiblingDB('admin').getUser('{{ mongodb_admin_user }}')" 2>/dev/null || echo "null"
+      register: admin_user_check
+      changed_when: false
+      failed_when: false
+
+    - name: Create admin user
+      shell: |
+        mongosh admin --eval "
+          db.createUser({
+            user: '{{ mongodb_admin_user }}',
+            pwd: '{{ mongodb_admin_password }}',
+            roles: [
+              { role: 'userAdminAnyDatabase', db: 'admin' },
+              { role: 'readWriteAnyDatabase', db: 'admin' },
+              { role: 'dbAdminAnyDatabase', db: 'admin' },
+              { role: 'clusterAdmin', db: 'admin' }
+            ]
+          })
+        "
+      when: "'null' in admin_user_check.stdout"
+      no_log: true
+
+    - name: Create application database user
+      shell: |
+        mongosh admin -u {{ mongodb_admin_user }} -p '{{ mongodb_admin_password }}' --eval "
+          db.getSiblingDB('{{ mongodb_app_database }}').createUser({
+            user: '{{ mongodb_app_user }}',
+            pwd: '{{ mongodb_app_password }}',
+            roles: [
+              { role: 'readWrite', db: '{{ mongodb_app_database }}' }
+            ]
+          })
+        "
+      when: "'null' in admin_user_check.stdout"
+      no_log: true
+
+    - name: Create exporter user for monitoring
+      shell: |
+        mongosh admin -u {{ mongodb_admin_user }} -p '{{ mongodb_admin_password }}' --eval "
+          db.createUser({
+            user: '{{ mongodb_exporter_user }}',
+            pwd: '{{ mongodb_exporter_password }}',
+            roles: [
+              { role: 'clusterMonitor', db: 'admin' },
+              { role: 'read', db: 'local' }
+            ]
+          })
+        "
+      when: "'null' in admin_user_check.stdout"
+      no_log: true
+
+    #--------------------------------------------------------------------------
+    # Install MongoDB Exporter
+    #--------------------------------------------------------------------------
+    - name: Download MongoDB exporter
+      get_url:
+        url: "https://github.com/percona/mongodb_exporter/releases/download/v{{ mongodb_exporter_version }}/mongodb_exporter-{{ mongodb_exporter_version }}.linux-amd64.tar.gz"
+        dest: /tmp/mongodb_exporter.tar.gz
+        mode: '0644'
+
+    - name: Extract MongoDB exporter
+      unarchive:
+        src: /tmp/mongodb_exporter.tar.gz
+        dest: /tmp/
+        remote_src: yes
+
+    - name: Install MongoDB exporter binary
+      copy:
+        src: "/tmp/mongodb_exporter-{{ mongodb_exporter_version }}.linux-amd64/mongodb_exporter"
+        dest: /usr/local/bin/mongodb_exporter
+        remote_src: yes
+        mode: '0755'
+
+    - name: Create MongoDB exporter systemd service
+      template:
+        src: mongodb_exporter.service.j2
+        dest: /etc/systemd/system/mongodb_exporter.service
+        mode: '0644'
+      notify: Restart MongoDB Exporter
+
+    - name: Start MongoDB exporter service
+      systemd:
+        name: mongodb_exporter
+        state: started
+        enabled: yes
+        daemon_reload: yes
+
+    #--------------------------------------------------------------------------
+    # Display status
+    #--------------------------------------------------------------------------
+    - name: Get MongoDB status
+      command: systemctl status mongod
+      register: mongodb_status
+      changed_when: false
+      failed_when: false
+
+    - name: Display MongoDB status
+      debug:
+        msg: |
+          MongoDB Setup Complete!
+          
+          Connection String: mongodb://{{ mongodb_app_user }}:{{ mongodb_app_password }}@{{ ansible_default_ipv4.address }}:{{ mongodb_port }}/{{ mongodb_app_database }}
+          
+          Admin User: {{ mongodb_admin_user }}
+          App User: {{ mongodb_app_user }}
+          Database: {{ mongodb_app_database }}
+          
+          MongoDB Exporter running on port 9216
+
+  handlers:
+    - name: Restart MongoDB
+      systemd:
+        name: mongod
+        state: restarted
+
+    - name: Restart MongoDB Exporter
+      systemd:
+        name: mongodb_exporter
+        state: restarted

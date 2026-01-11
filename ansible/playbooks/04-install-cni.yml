@@ -1,0 +1,114 @@
+#==============================================================================
+# Playbook 04: Install CNI (Calico)
+#==============================================================================
+# Installs Calico CNI plugin for pod networking.
+# Waits for all pods to be ready before completing.
+#
+# Run: ansible-playbook -i inventory/hosts.ini playbooks/04-install-cni.yml
+#==============================================================================
+---
+- name: Install Calico CNI on the cluster
+  hosts: master
+  become: no
+  become_user: ubuntu
+  gather_facts: no
+  tags:
+    - cni
+    - calico
+
+  environment:
+    KUBECONFIG: /home/ubuntu/.kube/config
+
+  vars:
+    calico_version: "v3.27.0"
+    calico_manifest_url: "https://raw.githubusercontent.com/projectcalico/calico/{{ calico_version }}/manifests/calico.yaml"
+
+  tasks:
+    #--------------------------------------------------------------------------
+    # Install Calico
+    #--------------------------------------------------------------------------
+    - name: Check if Calico is already installed
+      command: kubectl get pods -n kube-system -l k8s-app=calico-node -o name
+      register: calico_pods
+      changed_when: false
+      failed_when: false
+
+    - name: Download Calico manifest
+      get_url:
+        url: "{{ calico_manifest_url }}"
+        dest: /tmp/calico.yaml
+        mode: '0644'
+      when: calico_pods.stdout == ""
+
+    - name: Apply Calico CNI manifest
+      command: kubectl apply -f /tmp/calico.yaml
+      register: calico_apply
+      when: calico_pods.stdout == ""
+
+    - name: Display Calico installation output
+      debug:
+        var: calico_apply.stdout_lines
+      when: calico_apply is changed
+
+    #--------------------------------------------------------------------------
+    # Wait for Calico pods to be ready
+    #--------------------------------------------------------------------------
+    - name: Wait for Calico pods to be ready
+      command: >
+        kubectl wait --for=condition=ready pods
+        -l k8s-app=calico-node
+        -n kube-system
+        --timeout=300s
+      register: calico_ready
+      retries: 5
+      delay: 30
+      until: calico_ready.rc == 0
+
+    - name: Wait for CoreDNS pods to be ready
+      command: >
+        kubectl wait --for=condition=ready pods
+        -l k8s-app=kube-dns
+        -n kube-system
+        --timeout=300s
+      register: coredns_ready
+      retries: 5
+      delay: 30
+      until: coredns_ready.rc == 0
+
+    #--------------------------------------------------------------------------
+    # Verify nodes are Ready
+    #--------------------------------------------------------------------------
+    - name: Wait for all nodes to be Ready
+      command: kubectl get nodes -o jsonpath='{.items[*].status.conditions[?(@.type=="Ready")].status}'
+      register: node_status
+      until: "'False' not in node_status.stdout and 'Unknown' not in node_status.stdout"
+      retries: 30
+      delay: 10
+      changed_when: false
+
+    - name: Display final node status
+      command: kubectl get nodes -o wide
+      register: final_nodes
+      changed_when: false
+
+    - name: Show cluster status
+      debug:
+        msg: |
+          CNI Installation Complete!
+          
+          Nodes:
+          {{ final_nodes.stdout }}
+
+    #--------------------------------------------------------------------------
+    # Verify pod networking
+    #--------------------------------------------------------------------------
+    - name: Get all kube-system pods
+      command: kubectl get pods -n kube-system -o wide
+      register: kube_system_pods
+      changed_when: false
+
+    - name: Display kube-system pods
+      debug:
+        msg: |
+          Kube-system pods:
+          {{ kube_system_pods.stdout }}

@@ -1,0 +1,112 @@
+#==============================================================================
+# GitHub Actions - Update Manifests Workflow
+#==============================================================================
+# This workflow handles manifest updates from the todo-app repository.
+# It can be triggered via repository_dispatch or workflow_dispatch.
+#==============================================================================
+name: Update Kubernetes Manifests
+
+on:
+  # Manual trigger
+  workflow_dispatch:
+    inputs:
+      backend_tag:
+        description: 'Backend image tag'
+        required: false
+        type: string
+      frontend_tag:
+        description: 'Frontend image tag'
+        required: false
+        type: string
+  
+  # Trigger from todo-app repository
+  repository_dispatch:
+    types: [update-manifests]
+
+env:
+  DOCKER_USERNAME: yourusername
+
+jobs:
+  update-manifests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set image tags
+        id: set-tags
+        run: |
+          # Use provided tags or default to 'latest'
+          if [ "${{ github.event_name }}" == "repository_dispatch" ]; then
+            BACKEND_TAG="${{ github.event.client_payload.backend_tag }}"
+            FRONTEND_TAG="${{ github.event.client_payload.frontend_tag }}"
+          else
+            BACKEND_TAG="${{ inputs.backend_tag }}"
+            FRONTEND_TAG="${{ inputs.frontend_tag }}"
+          fi
+          
+          # Default to 'latest' if not provided
+          BACKEND_TAG="${BACKEND_TAG:-latest}"
+          FRONTEND_TAG="${FRONTEND_TAG:-latest}"
+          
+          echo "backend_tag=$BACKEND_TAG" >> $GITHUB_OUTPUT
+          echo "frontend_tag=$FRONTEND_TAG" >> $GITHUB_OUTPUT
+          
+          echo "Backend tag: $BACKEND_TAG"
+          echo "Frontend tag: $FRONTEND_TAG"
+
+      - name: Update backend deployment image
+        if: steps.set-tags.outputs.backend_tag != ''
+        run: |
+          # Update the image tag in backend deployment
+          sed -i "s|image: ${{ env.DOCKER_USERNAME }}/todo-backend:.*|image: ${{ env.DOCKER_USERNAME }}/todo-backend:${{ steps.set-tags.outputs.backend_tag }}|g" \
+            kubernetes/mern-app/backend-deployment.yaml
+          
+          echo "Updated backend deployment:"
+          grep "image:" kubernetes/mern-app/backend-deployment.yaml
+
+      - name: Update frontend deployment image
+        if: steps.set-tags.outputs.frontend_tag != ''
+        run: |
+          # Update the image tag in frontend deployment
+          sed -i "s|image: ${{ env.DOCKER_USERNAME }}/todo-frontend:.*|image: ${{ env.DOCKER_USERNAME }}/todo-frontend:${{ steps.set-tags.outputs.frontend_tag }}|g" \
+            kubernetes/mern-app/frontend-deployment.yaml
+          
+          echo "Updated frontend deployment:"
+          grep "image:" kubernetes/mern-app/frontend-deployment.yaml
+
+      - name: Commit and push changes
+        run: |
+          git config user.name "GitHub Actions Bot"
+          git config user.email "actions@github.com"
+          
+          # Check if there are changes to commit
+          if git diff --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          
+          git add kubernetes/mern-app/backend-deployment.yaml
+          git add kubernetes/mern-app/frontend-deployment.yaml
+          
+          git commit -m "chore: update image tags [skip ci]
+          
+          - Backend: ${{ steps.set-tags.outputs.backend_tag }}
+          - Frontend: ${{ steps.set-tags.outputs.frontend_tag }}
+          
+          Triggered by: ${{ github.event_name }}"
+          
+          git push
+
+      - name: Summary
+        run: |
+          echo "## Manifest Update Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Component | New Image Tag |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|---------------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Backend | ${{ steps.set-tags.outputs.backend_tag }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Frontend | ${{ steps.set-tags.outputs.frontend_tag }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "ArgoCD will automatically sync the changes to the cluster." >> $GITHUB_STEP_SUMMARY

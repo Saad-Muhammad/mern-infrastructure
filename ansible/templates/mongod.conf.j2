@@ -1,0 +1,46 @@
+#==============================================================================
+# MongoDB Configuration Template
+#==============================================================================
+# Jinja2 template for MongoDB server configuration.
+# Configured for production use with authentication enabled.
+#==============================================================================
+
+# Where and how to store data.
+storage:
+  dbPath: {{ mongodb_data_dir }}
+  journal:
+    enabled: true
+  wiredTiger:
+    engineConfig:
+      cacheSizeGB: 1
+
+# Where to write logging data.
+systemLog:
+  destination: file
+  logAppend: true
+  path: {{ mongodb_log_dir }}/mongod.log
+  logRotate: reopen
+
+# Network interfaces
+net:
+  port: {{ mongodb_port }}
+  bindIp: 0.0.0.0
+  maxIncomingConnections: 1000
+
+# How the process runs
+processManagement:
+  timeZoneInfo: /usr/share/zoneinfo
+  fork: false
+
+# Security settings
+security:
+  authorization: enabled
+
+# Operation Profiling
+operationProfiling:
+  slowOpThresholdMs: 100
+  mode: slowOp
+
+# Replication (commented out for single instance)
+# replication:
+#   replSetName: rs0

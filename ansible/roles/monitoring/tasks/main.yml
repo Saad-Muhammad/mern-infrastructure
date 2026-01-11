@@ -1,0 +1,26 @@
+#==============================================================================
+# Monitoring Role - Deploy monitoring stack
+#==============================================================================
+# This role is used when deploying monitoring components manually.
+# Primary deployment is via Helm in the dedicated playbook.
+#==============================================================================
+---
+- name: Create monitoring namespace
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: monitoring
+        labels:
+          name: monitoring
+
+- name: Wait for namespace to be ready
+  kubernetes.core.k8s_info:
+    kind: Namespace
+    name: monitoring
+  register: ns_result
+  until: ns_result.resources | length > 0
+  retries: 10
+  delay: 5

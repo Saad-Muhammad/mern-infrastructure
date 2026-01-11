@@ -1,0 +1,74 @@
+#==============================================================================
+# Global Variables for All Hosts
+#==============================================================================
+# These variables are applied to all hosts in the Ansible inventory.
+#==============================================================================
+
+#------------------------------------------------------------------------------
+# SSH Configuration
+#------------------------------------------------------------------------------
+ansible_ssh_private_key_file: "C:\Users\User\Documents\AWS\aws-rsa-keys.pem"
+ansible_user: ubuntu
+
+#------------------------------------------------------------------------------
+# Kubernetes Configuration
+#------------------------------------------------------------------------------
+kubernetes_version: "1.29"
+pod_network_cidr: "10.244.0.0/16"
+service_cidr: "10.96.0.0/12"
+
+# Container runtime
+container_runtime: containerd
+containerd_version: "1.7.*"
+
+#------------------------------------------------------------------------------
+# MongoDB Configuration
+#------------------------------------------------------------------------------
+mongodb_version: "7.0"
+mongodb_port: 27017
+mongodb_data_dir: "/data/mongodb"
+mongodb_log_dir: "/var/log/mongodb"
+
+# MongoDB credentials (override in vault or secure location)
+mongodb_admin_user: "admin"
+mongodb_admin_password: "admin"
+mongodb_app_database: "todo_app"
+mongodb_app_user: "todo_user"
+mongodb_app_password: "admin"
+
+#------------------------------------------------------------------------------
+# Monitoring Configuration
+#------------------------------------------------------------------------------
+grafana_admin_password: "admin"
+prometheus_retention: "15d"
+prometheus_storage_size: "50Gi"
+
+# Node ports for services
+grafana_nodeport: 30003
+argocd_nodeport: 30080
+
+#------------------------------------------------------------------------------
+# Application Configuration
+#------------------------------------------------------------------------------
+app_namespace: "mern-app"
+docker_registry: "docker.io"
+docker_username: "mrtoast07"
+
+#------------------------------------------------------------------------------
+# Helm Repositories
+#------------------------------------------------------------------------------
+helm_repos:
+  - name: prometheus-community
+    url: https://prometheus-community.github.io/helm-charts
+  - name: grafana
+    url: https://grafana.github.io/helm-charts
+  - name: argo
+    url: https://argoproj.github.io/argo-helm
+
+#------------------------------------------------------------------------------
+# ArgoCD Configuration
+#------------------------------------------------------------------------------
+argocd_namespace: "argocd"
+argocd_version: "stable"
+github_repo_url: "https://github.com/yourusername/mern-infrastructure.git"
+github_repo_branch: "main"

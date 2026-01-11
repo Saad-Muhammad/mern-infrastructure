@@ -1,0 +1,32 @@
+#==============================================================================
+# MongoDB Exporter Systemd Service Template
+#==============================================================================
+# Systemd service unit for MongoDB Prometheus exporter.
+#==============================================================================
+
+[Unit]
+Description=MongoDB Exporter for Prometheus
+Documentation=https://github.com/percona/mongodb_exporter
+After=network-online.target mongodb.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mongodb
+Group=mongodb
+
+Environment="MONGODB_URI=mongodb://{{ mongodb_exporter_user }}:{{ mongodb_exporter_password }}@localhost:{{ mongodb_port }}/admin"
+
+ExecStart=/usr/local/bin/mongodb_exporter \
+    --web.listen-address=:9216 \
+    --collect-all \
+    --discovering-mode
+
+Restart=always
+RestartSec=5
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

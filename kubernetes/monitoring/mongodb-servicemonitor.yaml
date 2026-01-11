@@ -1,0 +1,64 @@
+#==============================================================================
+# MongoDB ServiceMonitor and External Endpoint
+#==============================================================================
+# This creates the resources needed for Prometheus to scrape MongoDB metrics
+# from the external MongoDB exporter running on the MongoDB EC2 instance.
+#==============================================================================
+
+---
+# Endpoints for external MongoDB exporter
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: mongodb-exporter
+  namespace: monitoring
+  labels:
+    app: mongodb-exporter
+subsets:
+  - addresses:
+      - ip: "10.0.11.100"  # Replace with MongoDB private IP from Terraform
+    ports:
+      - name: metrics
+        port: 9216
+        protocol: TCP
+
+---
+# Service pointing to external MongoDB exporter
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongodb-exporter
+  namespace: monitoring
+  labels:
+    app: mongodb-exporter
+spec:
+  type: ClusterIP
+  ports:
+    - name: metrics
+      port: 9216
+      targetPort: 9216
+      protocol: TCP
+  # No selector - using manual endpoints above
+
+---
+# ServiceMonitor for Prometheus to scrape MongoDB metrics
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: mongodb-exporter
+  namespace: monitoring
+  labels:
+    app: mongodb-exporter
+    release: prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app: mongodb-exporter
+  namespaceSelector:
+    matchNames:
+      - monitoring
+  endpoints:
+    - port: metrics
+      interval: 30s
+      scrapeTimeout: 10s
+      path: /metrics

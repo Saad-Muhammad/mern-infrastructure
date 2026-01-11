@@ -1,0 +1,50 @@
+#==============================================================================
+# ArgoCD Application - MERN App
+#==============================================================================
+# Defines the ArgoCD Application resource for GitOps-based deployment
+# of the MERN Todo application from the Git repository.
+#==============================================================================
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: mern-app
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: mern-app
+    app.kubernetes.io/part-of: mern-stack
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  # Project membership
+  project: default
+  
+  # Source repository configuration
+  source:
+    repoURL: https://github.com/yourusername/mern-infrastructure.git
+    targetRevision: HEAD
+    path: kubernetes/mern-app
+  
+  # Destination cluster and namespace
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: mern-app
+  
+  # Sync policy - automated with self-healing
+  syncPolicy:
+    automated:
+      prune: true      # Delete resources no longer in Git
+      selfHeal: true   # Revert manual changes
+      allowEmpty: false
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+  
+  # Revision history limit
+  revisionHistoryLimit: 10

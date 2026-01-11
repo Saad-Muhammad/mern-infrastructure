@@ -1,0 +1,150 @@
+#==============================================================================
+# Playbook 07: Deploy ArgoCD
+#==============================================================================
+# Deploys ArgoCD for GitOps-based continuous deployment.
+# Retrieves admin password for initial access.
+#
+# Run: ansible-playbook -i inventory/hosts.ini playbooks/07-deploy-argocd.yml
+#==============================================================================
+---
+- name: Deploy ArgoCD
+  hosts: master
+  become: no
+  become_user: ubuntu
+  gather_facts: no
+  tags:
+    - argocd
+    - gitops
+
+  environment:
+    KUBECONFIG: /home/ubuntu/.kube/config
+
+  vars:
+    argocd_namespace: argocd
+    argocd_manifest_url: "https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml"
+
+  tasks:
+    #--------------------------------------------------------------------------
+    # Create ArgoCD namespace
+    #--------------------------------------------------------------------------
+    - name: Create ArgoCD namespace
+      command: kubectl create namespace {{ argocd_namespace }}
+      register: create_ns
+      changed_when: create_ns.rc == 0
+      failed_when: create_ns.rc != 0 and 'AlreadyExists' not in create_ns.stderr
+
+    #--------------------------------------------------------------------------
+    # Install ArgoCD
+    #--------------------------------------------------------------------------
+    - name: Check if ArgoCD is already installed
+      command: kubectl get deployment argocd-server -n {{ argocd_namespace }}
+      register: argocd_check
+      changed_when: false
+      failed_when: false
+
+    - name: Apply ArgoCD manifest
+      command: kubectl apply -n {{ argocd_namespace }} -f {{ argocd_manifest_url }}
+      register: argocd_install
+      when: argocd_check.rc != 0
+
+    - name: Display ArgoCD installation output
+      debug:
+        var: argocd_install.stdout_lines
+      when: argocd_install is changed
+
+    #--------------------------------------------------------------------------
+    # Wait for ArgoCD to be ready
+    #--------------------------------------------------------------------------
+    - name: Wait for ArgoCD server deployment to be ready
+      command: >
+        kubectl rollout status deployment/argocd-server
+        -n {{ argocd_namespace }}
+        --timeout=300s
+      register: argocd_ready
+      retries: 5
+      delay: 30
+      until: argocd_ready.rc == 0
+
+    - name: Wait for ArgoCD repo server to be ready
+      command: >
+        kubectl rollout status deployment/argocd-repo-server
+        -n {{ argocd_namespace }}
+        --timeout=300s
+
+    - name: Wait for ArgoCD application controller to be ready
+      command: >
+        kubectl rollout status deployment/argocd-applicationset-controller
+        -n {{ argocd_namespace }}
+        --timeout=300s
+      failed_when: false
+
+    #--------------------------------------------------------------------------
+    # Patch ArgoCD server service to NodePort (optional)
+    #--------------------------------------------------------------------------
+    - name: Patch ArgoCD server to NodePort
+      command: >
+        kubectl patch svc argocd-server -n {{ argocd_namespace }}
+        -p '{"spec": {"type": "NodePort", "ports": [{"name": "http", "port": 80, "targetPort": 8080, "nodePort": {{ argocd_nodeport }} }, {"name": "https", "port": 443, "targetPort": 8080}]}}'
+      register: patch_result
+      changed_when: patch_result.rc == 0
+      failed_when: false
+
+    #--------------------------------------------------------------------------
+    # Get admin password
+    #--------------------------------------------------------------------------
+    - name: Get ArgoCD admin initial password
+      command: >
+        kubectl -n {{ argocd_namespace }} get secret argocd-initial-admin-secret
+        -o jsonpath="{.data.password}"
+      register: argocd_password_base64
+      changed_when: false
+
+    - name: Decode ArgoCD admin password
+      shell: echo "{{ argocd_password_base64.stdout }}" | base64 -d
+      register: argocd_password
+      changed_when: false
+
+    #--------------------------------------------------------------------------
+    # Display access information
+    #--------------------------------------------------------------------------
+    - name: Get ArgoCD pods
+      command: kubectl get pods -n {{ argocd_namespace }}
+      register: argocd_pods
+      changed_when: false
+
+    - name: Get ArgoCD services
+      command: kubectl get svc -n {{ argocd_namespace }}
+      register: argocd_services
+      changed_when: false
+
+    - name: Display ArgoCD status
+      debug:
+        msg: |
+          ArgoCD Deployed Successfully!
+          
+          Pods:
+          {{ argocd_pods.stdout }}
+          
+          Services:
+          {{ argocd_services.stdout }}
+          
+          Access Information:
+          - URL: https://<WORKER_IP>:{{ argocd_nodeport }}
+          - Username: admin
+          - Password: {{ argocd_password.stdout }}
+          
+          To access via CLI:
+          argocd login <WORKER_IP>:{{ argocd_nodeport }} --username admin --password '{{ argocd_password.stdout }}' --insecure
+
+    #--------------------------------------------------------------------------
+    # Save password to file
+    #--------------------------------------------------------------------------
+    - name: Save ArgoCD password to file
+      copy:
+        content: |
+          ArgoCD Credentials
+          ==================
+          Username: admin
+          Password: {{ argocd_password.stdout }}
+        dest: /home/ubuntu/argocd-credentials.txt
+        mode: '0600'

@@ -1,0 +1,110 @@
+#==============================================================================
+# Playbook 05: Install Helm
+#==============================================================================
+# Installs Helm package manager on the master node.
+# Adds common Helm repositories for Prometheus, Grafana, and ArgoCD.
+#
+# Run: ansible-playbook -i inventory/hosts.ini playbooks/05-install-helm.yml
+#==============================================================================
+---
+- name: Install Helm on master node
+  hosts: master
+  become: yes
+  gather_facts: no
+  tags:
+    - helm
+
+  vars:
+    helm_install_script: "https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3"
+
+  tasks:
+    #--------------------------------------------------------------------------
+    # Install Helm
+    #--------------------------------------------------------------------------
+    - name: Check if Helm is already installed
+      command: which helm
+      register: helm_check
+      changed_when: false
+      failed_when: false
+
+    - name: Download Helm installation script
+      get_url:
+        url: "{{ helm_install_script }}"
+        dest: /tmp/get_helm.sh
+        mode: '0755'
+      when: helm_check.rc != 0
+
+    - name: Run Helm installation script
+      command: /tmp/get_helm.sh
+      when: helm_check.rc != 0
+      register: helm_install
+
+    - name: Display Helm installation output
+      debug:
+        var: helm_install.stdout_lines
+      when: helm_install is changed
+
+    - name: Verify Helm installation
+      command: helm version --short
+      register: helm_version
+      changed_when: false
+
+    - name: Display Helm version
+      debug:
+        msg: "Helm version: {{ helm_version.stdout }}"
+
+    #--------------------------------------------------------------------------
+    # Add Helm repositories
+    #--------------------------------------------------------------------------
+    - name: Add Prometheus community Helm repo
+      become: no
+      become_user: ubuntu
+      command: helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+      environment:
+        KUBECONFIG: /home/ubuntu/.kube/config
+      register: prometheus_repo
+      changed_when: "'has been added' in prometheus_repo.stdout"
+      failed_when: false
+
+    - name: Add Grafana Helm repo
+      become: no
+      become_user: ubuntu
+      command: helm repo add grafana https://grafana.github.io/helm-charts
+      environment:
+        KUBECONFIG: /home/ubuntu/.kube/config
+      register: grafana_repo
+      changed_when: "'has been added' in grafana_repo.stdout"
+      failed_when: false
+
+    - name: Add ArgoCD Helm repo
+      become: no
+      become_user: ubuntu
+      command: helm repo add argo https://argoproj.github.io/argo-helm
+      environment:
+        KUBECONFIG: /home/ubuntu/.kube/config
+      register: argo_repo
+      changed_when: "'has been added' in argo_repo.stdout"
+      failed_when: false
+
+    - name: Update Helm repositories
+      become: no
+      become_user: ubuntu
+      command: helm repo update
+      environment:
+        KUBECONFIG: /home/ubuntu/.kube/config
+      changed_when: false
+
+    - name: List Helm repositories
+      become: no
+      become_user: ubuntu
+      command: helm repo list
+      environment:
+        KUBECONFIG: /home/ubuntu/.kube/config
+      register: helm_repos
+      changed_when: false
+
+    - name: Display Helm repositories
+      debug:
+        msg: |
+          Helm Repositories:
+          {{ helm_repos.stdout }}

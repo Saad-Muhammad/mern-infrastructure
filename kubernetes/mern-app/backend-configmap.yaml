@@ -1,0 +1,28 @@
+#==============================================================================
+# Backend ConfigMap
+#==============================================================================
+# Configuration for the backend API service.
+# Update MONGODB_HOST with actual MongoDB private IP from Terraform output.
+#==============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backend-config
+  namespace: mern-app
+  labels:
+    app: backend
+    app.kubernetes.io/name: backend
+    app.kubernetes.io/component: api
+data:
+  # MongoDB connection settings
+  MONGODB_HOST: "<MONGODB_PRIVATE_IP>"  # Replace with actual IP
+  MONGODB_PORT: "27017"
+  MONGODB_DATABASE: "todo_app"
+  
+  # Application settings
+  NODE_ENV: "production"
+  PORT: "3000"
+  
+  # API settings
+  API_PREFIX: "/api"
+  CORS_ORIGIN: "*"

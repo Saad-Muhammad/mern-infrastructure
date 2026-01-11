@@ -1,0 +1,47 @@
+#==============================================================================
+# Terraform Variables Example File
+#==============================================================================
+# Copy this file to terraform.tfvars and update with your values.
+# DO NOT commit terraform.tfvars to version control.
+#==============================================================================
+
+#------------------------------------------------------------------------------
+# General Settings
+#------------------------------------------------------------------------------
+project_name = "mern-app"
+environment  = "production"
+aws_region   = "us-east-1"
+
+#------------------------------------------------------------------------------
+# Network Configuration
+#------------------------------------------------------------------------------
+vpc_cidr             = "10.0.0.0/16"
+public_subnet_cidrs  = ["10.0.1.0/24", "10.0.2.0/24"]
+private_subnet_cidrs = ["10.0.10.0/24", "10.0.11.0/24"]
+
+#------------------------------------------------------------------------------
+# Security Configuration
+#------------------------------------------------------------------------------
+# Replace with your IP address for SSH access to bastion
+# Find your IP: curl -s ifconfig.me
+allowed_ssh_cidrs = ["YOUR_IP_ADDRESS/32"]
+
+# Name of your AWS key pair (must exist in AWS)
+key_name = "your-key-pair-name"
+
+#------------------------------------------------------------------------------
+# EC2 Instance Configuration
+#------------------------------------------------------------------------------
+bastion_instance_type = "t3.micro"
+master_instance_type  = "t3.medium"
+worker_instance_type  = "t3.medium"
+mongodb_instance_type = "t3.large"
+worker_count          = 2
+mongodb_ebs_size      = 100
+
+#------------------------------------------------------------------------------
+# SSL/TLS Configuration (Optional)
+#------------------------------------------------------------------------------
+# Leave empty to use HTTP only
+# For HTTPS, provide the ARN of an ACM certificate
+acm_certificate_arn = ""

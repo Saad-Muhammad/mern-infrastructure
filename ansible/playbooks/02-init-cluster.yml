@@ -1,0 +1,120 @@
+#==============================================================================
+# Playbook 02: Initialize Kubernetes Cluster
+#==============================================================================
+# Initializes the Kubernetes cluster on the master node using kubeadm.
+# Captures the join command for worker nodes.
+#
+# Run: ansible-playbook -i inventory/hosts.ini playbooks/02-init-cluster.yml
+#==============================================================================
+---
+- name: Initialize Kubernetes cluster on master node
+  hosts: master
+  become: yes
+  gather_facts: yes
+  tags:
+    - init
+    - master
+
+  vars:
+    kubeadm_config_dir: /etc/kubernetes
+    kubeconfig_dir: /home/ubuntu/.kube
+    join_command_file: /tmp/kubeadm_join_command.sh
+
+  tasks:
+    #--------------------------------------------------------------------------
+    # Pre-flight checks
+    #--------------------------------------------------------------------------
+    - name: Check if cluster is already initialized
+      stat:
+        path: /etc/kubernetes/admin.conf
+      register: kubeadm_already_init
+
+    - name: Get master node private IP
+      set_fact:
+        master_ip: "{{ ansible_default_ipv4.address }}"
+
+    - name: Display master IP
+      debug:
+        msg: "Master node IP: {{ master_ip }}"
+
+    #--------------------------------------------------------------------------
+    # Initialize cluster
+    #--------------------------------------------------------------------------
+    - name: Initialize Kubernetes cluster with kubeadm
+      command: >
+        kubeadm init
+        --pod-network-cidr={{ pod_network_cidr }}
+        --apiserver-advertise-address={{ master_ip }}
+        --control-plane-endpoint={{ master_ip }}:6443
+        --upload-certs
+      register: kubeadm_init_output
+      when: not kubeadm_already_init.stat.exists
+      timeout: 600
+
+    - name: Display kubeadm init output
+      debug:
+        var: kubeadm_init_output.stdout_lines
+      when: kubeadm_init_output is changed
+
+    #--------------------------------------------------------------------------
+    # Configure kubectl for ubuntu user
+    #--------------------------------------------------------------------------
+    - name: Create .kube directory for ubuntu user
+      file:
+        path: "{{ kubeconfig_dir }}"
+        state: directory
+        owner: ubuntu
+        group: ubuntu
+        mode: '0755'
+
+    - name: Copy admin.conf to ubuntu user kube config
+      copy:
+        src: /etc/kubernetes/admin.conf
+        dest: "{{ kubeconfig_dir }}/config"
+        owner: ubuntu
+        group: ubuntu
+        mode: '0600'
+        remote_src: yes
+
+    #--------------------------------------------------------------------------
+    # Generate and save join command
+    #--------------------------------------------------------------------------
+    - name: Generate kubeadm join command
+      command: kubeadm token create --print-join-command
+      register: join_command_output
+      changed_when: false
+
+    - name: Save join command to file
+      copy:
+        content: "{{ join_command_output.stdout }}"
+        dest: "{{ join_command_file }}"
+        mode: '0600'
+
+    - name: Set join command as fact
+      set_fact:
+        kubeadm_join_command: "{{ join_command_output.stdout }}"
+
+    - name: Display join command
+      debug:
+        msg: |
+          Join command saved to {{ join_command_file }}
+          Command: {{ kubeadm_join_command }}
+
+    #--------------------------------------------------------------------------
+    # Verify cluster status
+    #--------------------------------------------------------------------------
+    - name: Wait for API server to be ready
+      command: kubectl get nodes
+      become: no
+      become_user: ubuntu
+      environment:
+        KUBECONFIG: "{{ kubeconfig_dir }}/config"
+      register: kubectl_result
+      until: kubectl_result.rc == 0
+      retries: 30
+      delay: 10
+      changed_when: false
+
+    - name: Display cluster status
+      debug:
+        var: kubectl_result.stdout_lines
