@@ -181,6 +181,15 @@ resource "aws_security_group" "k8s_worker" {
     security_groups = [aws_security_group.bastion.id]
   }
 
+  # NodePort Services from Bastion (for SSH Tunneling)
+  ingress {
+    description     = "ArgoCD NodePort from bastion"
+    from_port       = 30080
+    to_port         = 30080
+    protocol        = "tcp"
+    security_groups = [aws_security_group.bastion.id]
+  }
+
   # NodePort Services from ALB
   ingress {
     description     = "NodePort services from ALB"
