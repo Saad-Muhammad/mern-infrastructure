@@ -43,7 +43,7 @@ spec:
           # Environment variables
           env:
             - name: REACT_APP_API_URL
-              value: "/api"
+              value: ""
           
           # Liveness probe
           livenessProbe:
