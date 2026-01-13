@@ -34,7 +34,7 @@ server:
 configs:
   repositories:
     mern-infrastructure:
-      url: https://github.com/yourusername/mern-infrastructure.git
+      url: https://github.com/Saad-Muhammad/mern-infrastructure.git
       # For private repos, add credentials:
       # username: your-username
       # password: your-personal-access-token

@@ -33,7 +33,7 @@ spec:
     spec:
       containers:
         - name: backend
-          image: yourusername/todo-backend:latest
+          image: mrtoast07/todo-backend:latest
           imagePullPolicy: Always
           ports:
             - name: http

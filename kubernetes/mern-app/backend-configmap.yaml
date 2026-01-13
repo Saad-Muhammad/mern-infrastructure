@@ -15,7 +15,7 @@ metadata:
     app.kubernetes.io/component: api
 data:
   # MongoDB connection settings
-  MONGODB_HOST: "<MONGODB_PRIVATE_IP>"  # Replace with actual IP
+  MONGODB_HOST: "10.0.11.30"  # Replace with actual IP
   MONGODB_PORT: "27017"
   MONGODB_DATABASE: "todo_app"
   

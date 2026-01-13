@@ -23,7 +23,7 @@ AWS VPC (10.0.0.0/16)
 | Component | Technology |
 |-----------|------------|
 | Infrastructure | Terraform |
-| Configuration | Ansible |
+| Configuration | Ansible **or** Bash Scripts |
 | Container Orchestration | Kubernetes (kubeadm) |
 | Container Registry | DockerHub |
 | Load Balancer | AWS ALB |
@@ -32,6 +32,8 @@ AWS VPC (10.0.0.0/16)
 | CI/CD | GitHub Actions |
 
 ## Quick Start
+
+### Option A: Using Ansible (Linux/Mac/WSL)
 
 ```bash
 # 1. Clone and configure
@@ -45,6 +47,20 @@ chmod +x scripts/setup.sh
 ./scripts/setup.sh
 ```
 
+### Option B: Using Bash Scripts (Windows/Any)
+
+```bash
+# 1. Clone and configure
+git clone <repo-url>
+cd mern-infrastructure
+cp terraform/terraform.tfvars.example terraform/terraform.tfvars
+# Edit terraform.tfvars with your values
+
+# 2. Run setup script with bash option
+chmod +x scripts/setup.sh
+./scripts/setup.sh --use-bash
+```
+
 ## Project Structure
 
 ```
@@ -52,7 +68,7 @@ mern-infrastructure/
 ├── terraform/          # Infrastructure as Code
 │   ├── modules/        # Reusable modules (vpc, ec2, alb, security-groups)
 │   └── *.tf           # Root configuration
-├── ansible/            # Configuration Management
+├── ansible/            # Configuration Management (Option A)
 │   ├── playbooks/      # 8 playbooks for complete setup
 │   ├── roles/          # Reusable roles (docker, kubeadm, monitoring)
 │   └── inventory/      # Host definitions
@@ -62,7 +78,10 @@ mern-infrastructure/
 │   └── namespaces/     # Namespace definitions
 ├── argocd/             # GitOps configuration
 ├── .github/workflows/  # CI/CD pipelines
-├── scripts/            # Automation scripts
+├── scripts/
+│   ├── setup.sh        # Main setup script
+│   ├── deploy.sh       # Application deployment
+│   └── bash/           # Bash scripts alternative (Option B)
 └── docs/               # Documentation
 ```
 
@@ -79,16 +98,24 @@ Internet → ALB:80 → Worker Nodes (NodePort) → Pods
 ## Prerequisites
 
 - Terraform >= 1.5
-- Ansible >= 2.14
 - AWS CLI configured
+- SSH client (Git Bash on Windows)
 - Docker
 - kubectl
+- **For Ansible option**: Ansible >= 2.14 (Linux/WSL)
+
+## Deployment Options
+
+| Option | Command | Best For |
+|--------|---------|----------|
+| Ansible | `./scripts/setup.sh` | Linux/Mac/WSL users |
+| Bash Scripts | `./scripts/setup.sh --use-bash` | Windows users |
 
 ## Deployment Steps
 
 1. **Configure Variables**: Edit `terraform/terraform.tfvars`
 2. **Terraform**: Provision AWS infrastructure
-3. **Ansible**: Configure Kubernetes cluster
+3. **Configure Cluster**: Ansible or Bash scripts
 4. **ArgoCD**: Deploy application via GitOps
 
 See [Deployment Guide](docs/deployment-guide.md) for detailed instructions.

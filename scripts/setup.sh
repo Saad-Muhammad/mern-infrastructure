@@ -5,14 +5,15 @@
 # This script automates the complete infrastructure setup process:
 # 1. Validates prerequisites
 # 2. Runs Terraform to provision AWS infrastructure
-# 3. Generates Ansible inventory from Terraform outputs
-# 4. Runs Ansible playbooks to configure the cluster
+# 3. Generates inventory from Terraform outputs
+# 4. Runs configuration (Ansible or Bash scripts)
 # 5. Displays access information
 #
 # Usage: ./scripts/setup.sh [options]
 # Options:
 #   --terraform-only    Only run Terraform
 #   --ansible-only      Only run Ansible (requires existing inventory)
+#   --bash-only         Only run Bash scripts (alternative to Ansible)
 #   --skip-apply        Skip Terraform apply (plan only)
 #   --help              Show this help message
 #==============================================================================
@@ -32,10 +33,14 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 TERRAFORM_DIR="$PROJECT_ROOT/terraform"
 ANSIBLE_DIR="$PROJECT_ROOT/ansible"
 
+BASH_DIR="$SCRIPT_DIR/bash"
+
 # Default options
 TERRAFORM_ONLY=false
 ANSIBLE_ONLY=false
+BASH_ONLY=false
 SKIP_APPLY=false
+USE_BASH=false  # Use bash scripts instead of Ansible
 
 #------------------------------------------------------------------------------
 # Helper Functions
@@ -76,6 +81,15 @@ while [[ $# -gt 0 ]]; do
             ANSIBLE_ONLY=true
             shift
             ;;
+        --bash-only)
+            BASH_ONLY=true
+            USE_BASH=true
+            shift
+            ;;
+        --use-bash)
+            USE_BASH=true
+            shift
+            ;;
         --skip-apply)
             SKIP_APPLY=true
             shift
@@ -99,18 +113,24 @@ check_prerequisites() {
     
     local missing_tools=()
     
-    # Check Terraform
-    if ! command -v terraform &> /dev/null; then
-        missing_tools+=("terraform")
-    else
-        log_success "Terraform $(terraform version -json | jq -r '.terraform_version') found"
+    # Check Terraform (skip if running config-only modes)
+    if [ "$ANSIBLE_ONLY" = false ] && [ "$BASH_ONLY" = false ]; then
+        if ! command -v terraform &> /dev/null; then
+            missing_tools+=("terraform")
+        else
+            log_success "Terraform $(terraform version --json 2>/dev/null | grep -o '"terraform_version":"[^"]*' | cut -d'"' -f4 || terraform version | head -1 | awk '{print $2}') found"
+        fi
     fi
     
-    # Check Ansible
-    if ! command -v ansible &> /dev/null; then
-        missing_tools+=("ansible")
+    # Check Ansible (only if NOT using bash scripts)
+    if [ "$USE_BASH" = false ] && [ "$BASH_ONLY" = false ]; then
+        if ! command -v ansible &> /dev/null; then
+            missing_tools+=("ansible")
+        else
+            log_success "Ansible $(ansible --version | head -1 | awk '{print $2}') found"
+        fi
     else
-        log_success "Ansible $(ansible --version | head -1 | awk '{print $2}') found"
+        log_info "Using bash scripts - Ansible not required"
     fi
     
     # Check AWS CLI
@@ -118,13 +138,6 @@ check_prerequisites() {
         missing_tools+=("aws-cli")
     else
         log_success "AWS CLI $(aws --version | awk '{print $1}' | cut -d'/' -f2) found"
-    fi
-    
-    # Check jq
-    if ! command -v jq &> /dev/null; then
-        missing_tools+=("jq")
-    else
-        log_success "jq found"
     fi
     
     # Check if AWS credentials are configured
@@ -141,6 +154,58 @@ check_prerequisites() {
     fi
     
     log_success "All prerequisites satisfied"
+}
+
+detect_ssh_key() {
+    log_info "Detecting SSH key..."
+    
+    # If using bash scripts, source config.sh to get SSH_KEY_PATH
+    if [ "$USE_BASH" = true ] || [ "$BASH_ONLY" = true ]; then
+        if [ -f "$BASH_DIR/config.sh" ]; then
+            source "$BASH_DIR/config.sh"
+            if [ -n "$SSH_KEY_PATH" ] && [ -f "$SSH_KEY_PATH" ]; then
+                log_success "Using SSH key from config.sh: $SSH_KEY_PATH"
+                return
+            fi
+        fi
+    fi
+    
+    # Check common locations
+    local key_locations=(
+        "/c/Users/User/Documents/AWS/aws-rsa-keys.pem"
+        "$HOME/Documents/AWS/aws-rsa-keys.pem"
+        "$HOME/.ssh/aws-rsa-keys.pem"
+    )
+    
+    for key_path in "${key_locations[@]}"; do
+        if [ -f "$key_path" ]; then
+            SSH_KEY_PATH="$key_path"
+            log_success "Found SSH key: $SSH_KEY_PATH"
+            return
+        fi
+    done
+    
+    # Try to find key_name in terraform.tfvars
+    if [ -f "$TERRAFORM_DIR/terraform.tfvars" ]; then
+        local key_name=$(grep "key_name" "$TERRAFORM_DIR/terraform.tfvars" | head -1 | cut -d'=' -f2 | tr -d ' "')
+        key_name=$(echo "$key_name" | xargs)
+        
+        if [ -n "$key_name" ]; then
+            if [ -f "$HOME/.ssh/${key_name}.pem" ]; then
+                SSH_KEY_PATH="$HOME/.ssh/${key_name}.pem"
+                log_success "Found SSH key: $SSH_KEY_PATH"
+                return
+            elif [ -f "$HOME/.ssh/${key_name}" ]; then
+                SSH_KEY_PATH="$HOME/.ssh/${key_name}"
+                log_success "Found SSH key: $SSH_KEY_PATH"
+                return
+            fi
+        fi
+    fi
+    
+    SSH_KEY_PATH="$HOME/.ssh/your-key.pem"
+    log_warning "Could not auto-detect key. Using default: $SSH_KEY_PATH"
+    log_info "Set SSH_KEY_PATH in scripts/bash/config.sh or export SSH_KEY_PATH=..."
 }
 
 #------------------------------------------------------------------------------
@@ -200,10 +265,11 @@ generate_inventory() {
     log_info "Generating Ansible inventory from Terraform outputs..."
     cd "$TERRAFORM_DIR"
     
-    # Get outputs
+    # Get outputs (parsing JSON without jq)
     local bastion_ip=$(terraform output -raw bastion_public_ip)
     local master_ip=$(terraform output -raw master_private_ip)
-    local worker_ips=$(terraform output -json worker_private_ips | jq -r '.[]')
+    # Parse worker IPs - remove brackets, quotes, and convert to newlines
+    local worker_ips=$(terraform output -json worker_private_ips | tr -d '[]"' | tr ',' '\n' | xargs)
     local mongodb_ip=$(terraform output -raw mongodb_private_ip)
     
     # Generate inventory file
@@ -245,11 +311,11 @@ workers
 mongodb
 
 [all:vars]
-ansible_ssh_private_key_file=~/.ssh/your-key.pem
+ansible_ssh_private_key_file=${SSH_KEY_PATH}
 ansible_ssh_common_args='-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
 
 [private:vars]
-ansible_ssh_common_args='-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ProxyCommand="ssh -W %h:%p -q ubuntu@${bastion_ip} -i ~/.ssh/your-key.pem"'
+ansible_ssh_common_args='-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ProxyCommand="ssh -W %h:%p -q ubuntu@${bastion_ip} -i ${SSH_KEY_PATH}"'
 EOF
 
     log_success "Inventory file generated: $inventory_file"
@@ -265,19 +331,42 @@ EOF
 wait_for_instances() {
     log_info "Waiting for instances to be ready..."
     
-    cd "$TERRAFORM_DIR"
-    local bastion_ip=$(terraform output -raw bastion_public_ip)
-    cd "$PROJECT_ROOT"
+    local bastion_ip="${BASTION_IP}"
     
-    log_info "Waiting for bastion host to accept SSH connections..."
+    # If BASTION_IP not set, try to get from Terraform
+    if [ -z "$bastion_ip" ]; then
+        if [ -d "$TERRAFORM_DIR" ]; then
+            cd "$TERRAFORM_DIR"
+            bastion_ip=$(terraform output -raw bastion_public_ip 2>/dev/null)
+            cd "$PROJECT_ROOT"
+        fi
+    fi
+    
+    if [ -z "$bastion_ip" ]; then
+        log_warning "Could not determine Bastion IP. Skipping connectivity check."
+        return
+    fi
+    
+    log_info "Waiting for bastion host ($bastion_ip) to accept SSH connections..."
     local max_attempts=30
     local attempt=1
     
     while [ $attempt -le $max_attempts ]; do
-        if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -o BatchMode=yes ubuntu@"$bastion_ip" exit 2>/dev/null; then
-            log_success "Bastion host is ready"
-            break
+        # Try SSH, show error on failure if debug needed (removed 2>/dev/null for first attempt)
+        if [ $attempt -eq 1 ]; then
+             if ssh -i "$SSH_KEY_PATH" -o StrictHostKeyChecking=no -o ConnectTimeout=5 -o BatchMode=yes ubuntu@"$bastion_ip" exit; then
+                log_success "Bastion host is ready"
+                break
+             else
+                log_info "First attempt failed. Retrying..."
+             fi
+        else
+             if ssh -i "$SSH_KEY_PATH" -o StrictHostKeyChecking=no -o ConnectTimeout=5 -o BatchMode=yes ubuntu@"$bastion_ip" exit 2>/dev/null; then
+                log_success "Bastion host is ready"
+                break
+             fi
         fi
+
         log_info "Attempt $attempt/$max_attempts - Waiting..."
         sleep 10
         ((attempt++))
@@ -285,6 +374,8 @@ wait_for_instances() {
     
     if [ $attempt -gt $max_attempts ]; then
         log_error "Timeout waiting for bastion host"
+        log_info "Debug: Attempted to connect to ubuntu@$bastion_ip with key $SSH_KEY_PATH"
+        log_info "Try connecting manually to verify: ssh -i \"$SSH_KEY_PATH\" ubuntu@$bastion_ip"
         exit 1
     fi
     
@@ -300,6 +391,7 @@ wait_for_instances() {
 run_ansible() {
     log_info "Running Ansible playbooks..."
     cd "$ANSIBLE_DIR"
+    export ANSIBLE_CONFIG="$ANSIBLE_DIR/ansible.cfg"
     
     local inventory="inventory/hosts.ini"
     
@@ -323,11 +415,53 @@ run_ansible() {
     
     for playbook in "${playbooks[@]}"; do
         log_info "Running $playbook..."
-        ansible-playbook -i "$inventory" "$playbook"
+        ansible-playbook -i "inventory/hosts.ini" "$playbook"
         log_success "Completed $playbook"
     done
     
     log_success "All Ansible playbooks completed"
+    cd "$PROJECT_ROOT"
+}
+
+#------------------------------------------------------------------------------
+# Run Bash Scripts (Alternative to Ansible)
+#------------------------------------------------------------------------------
+
+run_bash() {
+    log_info "Running Bash scripts for cluster configuration..."
+    
+    # Check if bash scripts directory exists
+    if [ ! -d "$BASH_DIR" ]; then
+        log_error "Bash scripts directory not found: $BASH_DIR"
+        exit 1
+    fi
+    
+    # Get outputs from Terraform
+    cd "$TERRAFORM_DIR"
+    export BASTION_IP=$(terraform output -raw bastion_public_ip)
+    export MASTER_IP=$(terraform output -raw master_private_ip)
+    # Parse worker IPs without jq - remove brackets and quotes, convert commas to spaces
+    export WORKER_IPS=$(terraform output -json worker_private_ips 2>/dev/null | tr -d '[]"\n\r' | tr ',' ' ' | xargs)
+    export MONGODB_IP=$(terraform output -raw mongodb_private_ip 2>/dev/null || echo "")
+    export SSH_KEY_PATH="$SSH_KEY_PATH"
+    
+    log_info "Configuration for bash scripts:"
+    echo "  BASTION_IP:  $BASTION_IP"
+    echo "  MASTER_IP:   $MASTER_IP"
+    echo "  WORKER_IPS:  $WORKER_IPS"
+    echo "  MONGODB_IP:  ${MONGODB_IP:-<not configured>}"
+    echo "  SSH_KEY:     $SSH_KEY_PATH"
+    echo ""
+    
+    cd "$BASH_DIR"
+    
+    # Make scripts executable
+    chmod +x *.sh
+    
+    # Run the master orchestration script
+    ./run-all.sh
+    
+    log_success "All Bash scripts completed"
     cd "$PROJECT_ROOT"
 }
 
@@ -356,8 +490,8 @@ display_access_info() {
     echo ""
     echo "SSH Access:"
     echo "-----------"
-    echo "Bastion:   ssh -i ~/.ssh/your-key.pem ubuntu@${bastion_ip}"
-    echo "Master:    ssh -i ~/.ssh/your-key.pem -J ubuntu@${bastion_ip} ubuntu@${master_ip}"
+    echo "Bastion:   ssh -i ${SSH_KEY_PATH} ubuntu@${bastion_ip}"
+    echo "Master:    ssh -i ${SSH_KEY_PATH} -J ubuntu@${bastion_ip} ubuntu@${master_ip}"
     echo ""
     echo "Next Steps:"
     echo "-----------"
@@ -383,17 +517,43 @@ main() {
     echo ""
     
     check_prerequisites
+    detect_ssh_key
     
-    if [ "$ANSIBLE_ONLY" = false ]; then
-        run_terraform
-        if [ "$SKIP_APPLY" = false ]; then
-            generate_inventory
-        fi
+    # Handle --bash-only mode (skip Terraform, run bash scripts only)
+    if [ "$BASH_ONLY" = true ]; then
+        log_info "Running in BASH-ONLY mode"
+        wait_for_instances
+        run_bash
+        display_access_info
+        return
+    fi
+    
+    # Handle --ansible-only mode (skip Terraform, run Ansible only)
+    if [ "$ANSIBLE_ONLY" = true ]; then
+        log_info "Running in ANSIBLE-ONLY mode"
+        wait_for_instances
+        run_ansible
+        display_access_info
+        return
+    fi
+    
+    # Full setup: Terraform + Configuration
+    run_terraform
+    if [ "$SKIP_APPLY" = false ]; then
+        generate_inventory
     fi
     
     if [ "$TERRAFORM_ONLY" = false ] && [ "$SKIP_APPLY" = false ]; then
         wait_for_instances
-        run_ansible
+        
+        # Choose configuration method
+        if [ "$USE_BASH" = true ]; then
+            log_info "Using Bash scripts for configuration (--use-bash flag)"
+            run_bash
+        else
+            log_info "Using Ansible for configuration"
+            run_ansible
+        fi
     fi
     
     if [ "$SKIP_APPLY" = false ]; then

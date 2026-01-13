@@ -20,7 +20,7 @@ spec:
   
   # Source repository configuration
   source:
-    repoURL: https://github.com/yourusername/mern-infrastructure.git
+    repoURL: https://github.com/Saad-Muhammad/mern-infrastructure.git
     targetRevision: HEAD
     path: kubernetes/mern-app
   

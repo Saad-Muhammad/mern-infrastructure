@@ -33,7 +33,7 @@ spec:
     spec:
       containers:
         - name: frontend
-          image: yourusername/todo-frontend:latest
+          image: mrtoast07/todo-frontend:latest
           imagePullPolicy: Always
           ports:
             - name: http

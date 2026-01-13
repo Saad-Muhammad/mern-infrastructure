@@ -24,7 +24,7 @@ on:
     types: [update-manifests]
 
 env:
-  DOCKER_USERNAME: yourusername
+  DOCKER_USERNAME: mrtoast07
 
 jobs:
   update-manifests:

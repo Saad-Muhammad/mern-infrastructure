@@ -70,5 +70,5 @@ helm_repos:
 #------------------------------------------------------------------------------
 argocd_namespace: "argocd"
 argocd_version: "stable"
-github_repo_url: "https://github.com/yourusername/mern-infrastructure.git"
+github_repo_url: "https://github.com/Saad-Muhammad/mern-infrastructure/
 github_repo_branch: "main"
